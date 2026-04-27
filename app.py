@@ -1,11 +1,9 @@
 import streamlit as st
 import yfinance as yf
-from yfinance import pdr_override
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-pdr_override()
 st.set_page_config(page_title="Final Project Dashboard", layout="wide")
 
 
@@ -92,14 +90,11 @@ portfolio_raw = st.sidebar.text_input(
 )
 portfolio = portfolio_raw.upper().split()
 
-# Real-time validation
-invalid_tickers = []
-for t in [stock] + portfolio:
-    if not t.isalpha() or len(t) > 6:
-        invalid_tickers.append(t)
+# Real-time basic validation (only letters, <=6 chars)
+invalid = [t for t in [stock] + portfolio if not t.isalpha() or len(t) > 6]
 
-if invalid_tickers:
-    st.sidebar.error(f"Invalid tickers detected: {', '.join(invalid_tickers)}")
+if invalid:
+    st.sidebar.error(f"⚠ Invalid tickers: {', '.join(invalid)}")
 
 
 # -----------------------------------------------------------
@@ -120,11 +115,11 @@ else:
     data["20MA"] = data["Close"].rolling(20).mean()
     data["50MA"] = data["Close"].rolling(50).mean()
 
-    # Trend logic
     price = data["Close"].iloc[-1]
     ma20 = data["20MA"].iloc[-1]
     ma50 = data["50MA"].iloc[-1]
 
+    # Trend
     if price > ma20 > ma50:
         trend = "Strong Uptrend"
     elif price < ma20 < ma50:
@@ -161,9 +156,8 @@ else:
     else:
         vol_class = "Low"
 
-    # Display results
+    # Display
     st.subheader(f"Results for {stock}")
-
     st.write(f"**Trend:** {trend_emoji(trend)}")
     st.write(f"**RSI:** {rsi_emoji(rsi_sig)} — {rsi_val:.2f}")
     st.write(f"**Volatility:** {vol_emoji(vol_class)} — {vol_val:.2%}")
@@ -206,23 +200,19 @@ else:
 
             benchmark_returns = bench.pct_change().dropna()
 
-            # Performance metrics
             total_return = (1 + portfolio_returns).prod() - 1
             bench_return = (1 + benchmark_returns).prod() - 1
             outperf = total_return - bench_return
-
             vol = portfolio_returns.std() * np.sqrt(252)
             sharpe = (portfolio_returns.mean()*252) / (portfolio_returns.std()*np.sqrt(252))
 
             st.subheader("Portfolio Metrics")
-
             st.write(f"**Total Return:** 🟦 {total_return:.2%}")
             st.write(f"**SPY Return:** 🟧 {bench_return:.2%}")
             st.write(f"**Outperformance:** {'🟢+' if outperf>0 else '🔴'} {outperf:.2%}")
             st.write(f"**Volatility:** {vol_emoji('High' if vol>0.4 else 'Medium' if vol>=0.25 else 'Low')} — {vol:.2%}")
             st.write(f"**Sharpe Ratio:** ⭐ {sharpe:.2f}")
 
-            # Chart
             st.markdown('<div class="chart-box-yellow">', unsafe_allow_html=True)
             cumulative = pd.DataFrame({
                 "Portfolio": (1 + portfolio_returns).cumprod(),
