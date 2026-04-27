@@ -119,13 +119,19 @@ else:
     ma20 = data["20MA"].iloc[-1]
     ma50 = data["50MA"].iloc[-1]
 
-    # Trend
-    if price > ma20 > ma50:
-        trend = "Strong Uptrend"
-    elif price < ma20 < ma50:
-        trend = "Strong Downtrend"
+    # -----------------------------
+    # FIXED Trend Logic (no errors)
+    # -----------------------------
+    if pd.isna(ma20) or pd.isna(ma50):
+        trend = "Mixed Trend"  # fallback
+        st.warning("⚠ Not enough data to compute moving averages.")
     else:
-        trend = "Mixed Trend"
+        if price > ma20 and ma20 > ma50:
+            trend = "Strong Uptrend"
+        elif price < ma20 and ma20 < ma50:
+            trend = "Strong Downtrend"
+        else:
+            trend = "Mixed Trend"
 
     # RSI
     delta = data["Close"].diff()
