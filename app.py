@@ -278,4 +278,42 @@ else:
         })
         st.line_chart(cumulative)
         st.markdown("</div>", unsafe_allow_html=True)
+data = safe_download(stock)
+
+if data is None:
+    st.error("❌ Unable to retrieve stock data. Try another ticker.")
+else:
+
+    # --------------------------------------------------------
+    # FIX: Normalize MultiIndex → always extract single column
+    # --------------------------------------------------------
+    if isinstance(data.columns, pd.MultiIndex):
+        # yfinance sometimes returns multiindex: ("Close", "AAPL")
+        if ("Close", stock) in data.columns:
+            close_series = data[("Close", stock)]
+        else:
+            st.error("❌ No valid 'Close' column found for this ticker.")
+            st.stop()
+    else:
+        if "Close" in data.columns:
+            close_series = data["Close"]
+        else:
+            st.error("❌ No 'Close' column in downloaded data.")
+            st.stop()
+
+    data["Close_fixed"] = close_series.astype(float)
+
+    # Use normalized close prices
+    data["20MA"] = data["Close_fixed"].rolling(20).mean()
+    data["50MA"] = data["Close_fixed"].rolling(50).mean()
+
+    # SAFE extraction of scalar price
+    try:
+        price = float(data["Close_fixed"].iloc[-1])
+    except:
+        st.error("❌ Could not extract latest price. Data may be incomplete.")
+        st.stop()
+
+    ma20 = float(data["20MA"].iloc[-1]) if not pd.isna(data["20MA"].iloc[-1]) else None
+    ma50 = float(data["50MA"].iloc[-1]) if not pd.isna(data["50MA"].iloc[-1]) else None
 
