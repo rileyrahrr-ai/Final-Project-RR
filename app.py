@@ -90,7 +90,6 @@ portfolio_raw = st.sidebar.text_input(
 )
 portfolio = portfolio_raw.upper().split()
 
-# Validate tickers (letters only, max length 6)
 invalid = [t for t in [stock] + portfolio if not t.isalpha() or len(t) > 6]
 if invalid:
     st.sidebar.error(f"⚠ Invalid tickers: {', '.join(invalid)}")
@@ -114,8 +113,9 @@ if raw is None or raw.empty:
         f"❌ Unable to retrieve stock data for **{stock}**.\n"
         "Yahoo Finance may be rate-limiting your request. Please try again shortly."
     )
+
 else:
-    # Handle MultiIndex: ("Close", "AAPL")
+    # Normalize MultiIndex → extract close
     if isinstance(raw.columns, pd.MultiIndex):
         close_candidates = [col for col in raw.columns if col[0] == "Close"]
         if close_candidates:
@@ -125,7 +125,7 @@ else:
             st.stop()
     else:
         if "Close" not in raw.columns:
-            st.error("❌ No 'Close' column in the downloaded data.")
+            st.error("❌ No 'Close' column in the data.")
             st.stop()
         close_series = raw["Close"]
 
@@ -143,6 +143,7 @@ else:
     ma20 = float(data["20MA"].iloc[-1]) if not pd.isna(data["20MA"].iloc[-1]) else None
     ma50 = float(data["50MA"].iloc[-1]) if not pd.isna(data["50MA"].iloc[-1]) else None
 
+    # Trend logic
     if ma20 is None or ma50 is None:
         trend = "Mixed Trend"
     else:
@@ -153,6 +154,7 @@ else:
         else:
             trend = "Mixed Trend"
 
+    # RSI
     delta = data["Close"].diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
@@ -171,6 +173,7 @@ else:
     else:
         rsi_sig = "Neutral"
 
+    # Volatility
     data["Return"] = data["Close"].pct_change()
     vol_vals = data["Return"].rolling(20).std() * np.sqrt(252)
     vol_val = float(vol_vals.iloc[-1]) if not pd.isna(vol_vals.iloc[-1]) else None
@@ -184,19 +187,36 @@ else:
     else:
         vol_class = "Low"
 
-    st.subheader(f"Results for {stock}")
-    st.write(f"**Trend:** {trend_emoji(trend)}")
-    st.write(f"**RSI:** {rsi_emoji(rsi_sig)} — {rsi_val:.2f}" if rsi_val else "RSI unavailable")
-    st.write(f"**Volatility:** {vol_emoji(vol_class)} — {vol_val:.2%}" if vol_val else "Volatility unavailable")
+    # FINAL BUY/HOLD/SELL RECOMMENDATION
+    if trend == "Strong Uptrend" and rsi_sig != "Overbought (Sell Signal)" and vol_class != "High":
+        final_reco_emoji = "🟢📈 BUY — Trend is strong and momentum supports upside."
+    elif trend == "Strong Downtrend" and rsi_sig != "Oversold (Buy Signal)":
+        final_reco_emoji = "🔴📉 SELL — The trend is weak and momentum is bearish."
+    else:
+        final_reco_emoji = "🟡🤔 HOLD — Signals are mixed or unclear."
 
-    st.markdown('<div class="chart-box-green">', unsafe_allow_html=True)
-    fig, ax = plt.subplots(figsize=(10, 4))
-    ax.plot(data["Close"], label="Close", color="white")
-    ax.plot(data["20MA"], label="20MA", color="cyan")
-    ax.plot(data["50MA"], label="50MA", color="magenta")
-    ax.legend()
-    st.pyplot(fig)
-    st.markdown("</div>", unsafe_allow_html=True)
+    # ============================================================
+    # SIDE-BY-SIDE LAYOUT
+    # ============================================================
+    col1, col2 = st.columns([1, 2])
+
+    with col1:
+        st.subheader(f"Results for {stock}")
+        st.write(f"**Trend:** {trend_emoji(trend)}")
+        st.write(f"**RSI:** {rsi_emoji(rsi_sig)} — {rsi_val:.2f}")
+        st.write(f"**Volatility:** {vol_emoji(vol_class)} — {vol_val:.2%}")
+        st.subheader("Final Recommendation")
+        st.write(f"### {final_reco_emoji}")
+
+    with col2:
+        st.markdown('<div class="chart-box-green">', unsafe_allow_html=True)
+        fig, ax = plt.subplots(figsize=(8, 4))
+        ax.plot(data["Close"], label="Close", color="white")
+        ax.plot(data["20MA"], label="20MA", color="cyan")
+        ax.plot(data["50MA"], label="50MA", color="magenta")
+        ax.legend()
+        st.pyplot(fig)
+        st.markdown("</div>", unsafe_allow_html=True)
 
 
 # =====================================================================
@@ -213,14 +233,14 @@ else:
         st.error("❌ Unable to load portfolio data. Try again later.")
         st.stop()
 
-    # Handle MultiIndex price columns
+    # Extract price matrix safely
     if isinstance(prices.columns, pd.MultiIndex):
         if ("Adj Close", portfolio[0]) in prices.columns:
             prices_used = prices["Adj Close"]
         elif ("Close", portfolio[0]) in prices.columns:
             prices_used = prices["Close"]
         else:
-            st.error("❌ Missing price columns in portfolio data.")
+            st.error("❌ No valid price columns found.")
             st.stop()
     else:
         if "Adj Close" in prices.columns:
@@ -228,12 +248,12 @@ else:
         elif "Close" in prices.columns:
             prices_used = prices["Close"]
         else:
-            st.error("❌ No valid price columns found.")
+            st.error("❌ No valid price column detected.")
             st.stop()
 
     bench = safe_download("SPY", period="1y")
     if bench is None:
-        st.error("❌ SPY benchmark failed to load.")
+        st.error("❌ Unable to load SPY benchmark.")
         st.stop()
 
     if "Adj Close" in bench.columns:
@@ -241,7 +261,7 @@ else:
     elif "Close" in bench.columns:
         bench_used = bench["Close"]
     else:
-        st.error("❌ SPY missing price columns.")
+        st.error("❌ SPY missing price data.")
         st.stop()
 
     returns = prices_used.pct_change().dropna()
@@ -250,33 +270,32 @@ else:
     portfolio_returns = (returns * weights).sum(axis=1).astype(float)
 
     raw_bench_returns = bench_used.pct_change().dropna()
-    if isinstance(raw_bench_returns, pd.DataFrame):
-        benchmark_returns = raw_bench_returns.iloc[:, 0]
-    else:
-        benchmark_returns = raw_bench_returns
-
+    benchmark_returns = raw_bench_returns.iloc[:, 0] if isinstance(raw_bench_returns, pd.DataFrame) else raw_bench_returns
     benchmark_returns = benchmark_returns.astype(float)
 
     total_return = float((1 + portfolio_returns).prod() - 1)
     bench_return = float((1 + benchmark_returns).prod() - 1)
     outperf = float(total_return - bench_return)
     vol = float(portfolio_returns.std() * np.sqrt(252))
-    sharpe = float((portfolio_returns.mean() * 252) /
-                   (portfolio_returns.std() * np.sqrt(252)))
+    sharpe = float((portfolio_returns.mean() * 252) / (portfolio_returns.std() * np.sqrt(252)))
 
-    st.subheader("Portfolio Metrics")
-    st.write(f"**Total Return:** 🟦 {total_return:.2%}")
-    st.write(f"**SPY Return:** 🟧 {bench_return:.2%}")
-    st.write(f"**Outperformance:** {'🟢+' if outperf > 0 else '🔴'} {outperf:.2%}")
-    st.write(f"**Volatility:** {vol_emoji('High' if vol > 0.40 else 'Medium' if vol >= 0.25 else 'Low')} — {vol:.2%}")
-    st.write(f"**Sharpe Ratio:** ⭐ {sharpe:.2f}")
+    # SIDE-BY-SIDE PORTFOLIO METRICS + GRAPH
+    colA, colB = st.columns([1, 2])
 
-    st.markdown('<div class="chart-box-yellow">', unsafe_allow_html=True)
-    cumulative = pd.DataFrame({
-        "Portfolio": (1 + portfolio_returns).cumprod(),
-        "SPY": (1 + benchmark_returns).cumprod()
-    })
-    st.line_chart(cumulative)
-    st.markdown("</div>", unsafe_allow_html=True)
+    with colA:
+        st.subheader("Portfolio Metrics")
+        st.write(f"**Total Return:** 🟦 {total_return:.2%}")
+        st.write(f"**SPY Return:** 🟧 {bench_return:.2%}")
+        st.write(f"**Outperformance:** {'🟢+' if outperf > 0 else '🔴'} {outperf:.2%}")
+        st.write(f"**Volatility:** {vol_emoji('High' if vol > 0.40 else 'Medium' if vol >= 0.25 else 'Low')} — {vol:.2%}")
+        st.write(f"**Sharpe Ratio:** ⭐ {sharpe:.2f}")
 
+    with colB:
+        st.markdown('<div class="chart-box-yellow">', unsafe_allow_html=True)
+        cumulative = pd.DataFrame({
+            "Portfolio": (1 + portfolio_returns).cumprod(),
+            "SPY": (1 + benchmark_returns).cumprod()
+        })
+        st.line_chart(cumulative)
+        st.markdown("</div>", unsafe_allow_html=True)
 
