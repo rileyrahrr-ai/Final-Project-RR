@@ -227,30 +227,17 @@ else:
             st.stop()
 
         # Returns
-        returns = prices_used.pct_change().dropna()
-        weights = np.array([1/5] * 5)
-        portfolio_returns = (returns * weights).sum(axis=1)
+returns = prices_used.pct_change().dropna()
+weights = np.array([1/5] * 5)
+portfolio_returns = (returns * weights).sum(axis=1)
 
-        benchmark_returns = bench_used.pct_change().dropna()
+benchmark_returns = bench_used.pct_change().dropna()
 
-        total_return = (1 + portfolio_returns).prod() - 1
-        bench_return = (1 + benchmark_returns).prod() - 1
-        outperf = total_return - bench_return
-        vol = portfolio_returns.std() * np.sqrt(252)
-        sharpe = (portfolio_returns.mean()*252) / (portfolio_returns.std()*np.sqrt(252))
-
-        st.subheader("Portfolio Metrics")
-
-        st.write(f"**Total Return:** 🟦 {total_return:.2%}")
-        st.write(f"**SPY Return:** 🟧 {bench_return:.2%}")
-        st.write(f"**Outperformance:** {'🟢+' if outperf>0 else '🔴'} {outperf:.2%}")
-        st.write(f"**Volatility:** {vol_emoji('High' if vol>0.40 else 'Medium' if vol>=0.25 else 'Low')} — {vol:.2%}")
-        st.write(f"**Sharpe Ratio:** ⭐ {sharpe:.2f}")
-
-        st.markdown('<div class="chart-box-yellow">', unsafe_allow_html=True)
-        cumulative = pd.DataFrame({
-            "Portfolio": (1 + portfolio_returns).cumprod(),
-            "SPY": (1 + benchmark_returns).cumprod()
-        })
-        st.line_chart(cumulative)
-        st.markdown("</div>", unsafe_allow_html=True)
+# -------------------------------
+# FIX: Always convert to floats
+# -------------------------------
+total_return = float((1 + portfolio_returns).prod() - 1)
+bench_return = float((1 + benchmark_returns).prod() - 1)
+outperf = float(total_return - bench_return)
+vol = float(portfolio_returns.std() * np.sqrt(252))
+sharpe = float((portfolio_returns.mean() * 252) / (portfolio_returns.std() * np.sqrt(252)))
