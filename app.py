@@ -7,9 +7,9 @@ import matplotlib.pyplot as plt
 st.set_page_config(page_title="Final Project Dashboard", layout="wide")
 
 
-# -----------------------------------------------------------
-# SAFE DOWNLOADER FOR STREAMLIT CLOUD
-# -----------------------------------------------------------
+# =====================================================================
+# SAFE DOWNLOAD FUNCTION (protects against yfinance rate limits)
+# =====================================================================
 def safe_download(ticker, period="6mo", interval="1d"):
     try:
         df = yf.download(
@@ -22,26 +22,26 @@ def safe_download(ticker, period="6mo", interval="1d"):
         if df is None or df.empty:
             return None
         return df
-    except Exception:
+    except:
         return None
 
 
-# -----------------------------------------------------------
-# EMOJI + COLOR HELPERS
-# -----------------------------------------------------------
-def trend_emoji(x):
-    if x == "Strong Uptrend":
+# =====================================================================
+# Emoji helper functions (Trend, RSI, Volatility)
+# =====================================================================
+def trend_emoji(tr):
+    if tr == "Strong Uptrend":
         return "🟢📈 Strong Uptrend"
-    elif x == "Strong Downtrend":
+    elif tr == "Strong Downtrend":
         return "🔴📉 Strong Downtrend"
     else:
         return "🟡〰️ Mixed Trend"
 
 
-def rsi_emoji(x):
-    if "Overbought" in x:
+def rsi_emoji(sig):
+    if "Overbought" in sig:
         return "🔴🔥 Overbought (Sell Signal)"
-    elif "Oversold" in x:
+    elif "Oversold" in sig:
         return "🟢💎 Oversold (Buy Signal)"
     else:
         return "🟡 Neutral"
@@ -56,9 +56,9 @@ def vol_emoji(level):
         return "🟢 Low Volatility"
 
 
-# -----------------------------------------------------------
-# CSS — Green & Yellow Chart Borders
-# -----------------------------------------------------------
+# =====================================================================
+# CSS: Chart borders (green/yellow)
+# =====================================================================
 st.markdown("""
 <style>
 .chart-box-green {
@@ -77,9 +77,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# -----------------------------------------------------------
-# SIDEBAR — INPUTS + REAL-TIME VALIDATION
-# -----------------------------------------------------------
+# =====================================================================
+# SIDEBAR INPUTS + BASIC VALIDATION
+# =====================================================================
 st.sidebar.title("Input Settings")
 
 stock = st.sidebar.text_input("Stock Ticker:", "AAPL").upper()
@@ -90,21 +90,21 @@ portfolio_raw = st.sidebar.text_input(
 )
 portfolio = portfolio_raw.upper().split()
 
-# Real-time basic validation (only letters, <=6 chars)
+# Validate tickers (letters only, max length 6)
 invalid = [t for t in [stock] + portfolio if not t.isalpha() or len(t) > 6]
-
 if invalid:
     st.sidebar.error(f"⚠ Invalid tickers: {', '.join(invalid)}")
 
 
-# -----------------------------------------------------------
-# MAIN HEADER
-# -----------------------------------------------------------
+# =====================================================================
+# MAIN TITLE
+# =====================================================================
 st.title("📊 Final Project Financial Dashboard")
 
-# -----------------------------------------------------------
+
+# =====================================================================
 # PART 1 — INDIVIDUAL STOCK ANALYSIS
-# -----------------------------------------------------------
+# =====================================================================
 st.header("Part 1: Individual Stock Analysis")
 
 data = safe_download(stock)
@@ -112,18 +112,19 @@ data = safe_download(stock)
 if data is None:
     st.error("❌ Unable to retrieve stock data. Try another ticker.")
 else:
+    # Moving averages
     data["20MA"] = data["Close"].rolling(20).mean()
     data["50MA"] = data["Close"].rolling(50).mean()
 
-    price = data["Close"].iloc[-1]
+    price = float(data["Close"].iloc[-1])
     ma20 = data["20MA"].iloc[-1]
     ma50 = data["50MA"].iloc[-1]
 
-    # -----------------------------
-    # FIXED Trend Logic (no errors)
-    # -----------------------------
+    # -----------------------------------------------------
+    # Trend logic (safe for NaN)
+    # -----------------------------------------------------
     if pd.isna(ma20) or pd.isna(ma50):
-        trend = "Mixed Trend"  # fallback
+        trend = "Mixed Trend"
         st.warning("⚠ Not enough data to compute moving averages.")
     else:
         if price > ma20 and ma20 > ma50:
@@ -133,7 +134,9 @@ else:
         else:
             trend = "Mixed Trend"
 
+    # -----------------------------------------------------
     # RSI
+    # -----------------------------------------------------
     delta = data["Close"].diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
@@ -141,7 +144,7 @@ else:
     avg_loss = loss.rolling(14).mean()
     rs = avg_gain / avg_loss
     data["RSI"] = 100 - (100 / (1 + rs))
-    rsi_val = data["RSI"].iloc[-1]
+    rsi_val = float(data["RSI"].iloc[-1])
 
     if rsi_val > 70:
         rsi_sig = "Overbought (Sell Signal)"
@@ -150,10 +153,12 @@ else:
     else:
         rsi_sig = "Neutral"
 
+    # -----------------------------------------------------
     # Volatility
+    # -----------------------------------------------------
     data["Return"] = data["Close"].pct_change()
-    vol = data["Return"].rolling(20).std() * np.sqrt(252)
-    vol_val = vol.iloc[-1]
+    vol_series = data["Return"].rolling(20).std() * np.sqrt(252)
+    vol_val = float(vol_series.iloc[-1])
 
     if vol_val > 0.40:
         vol_class = "High"
@@ -162,7 +167,7 @@ else:
     else:
         vol_class = "Low"
 
-    # Display
+    # Display results
     st.subheader(f"Results for {stock}")
     st.write(f"**Trend:** {trend_emoji(trend)}")
     st.write(f"**RSI:** {rsi_emoji(rsi_sig)} — {rsi_val:.2f}")
@@ -177,9 +182,12 @@ else:
     ax.legend()
     st.pyplot(fig)
     st.markdown("</div>", unsafe_allow_html=True)
-# -----------------------------------------------------------
+
+
+
+# =====================================================================
 # PART 2 — PORTFOLIO PERFORMANCE
-# -----------------------------------------------------------
+# =====================================================================
 st.header("Part 2: Portfolio Performance Dashboard")
 
 if len(portfolio) != 5:
@@ -188,34 +196,34 @@ else:
     prices = yf.download(portfolio, period="1y", progress=False)
 
     if prices is None or prices.empty:
-        st.error("❌ Unable to load portfolio data. YFinance may be rate-limited. Try again in 1 minute.")
+        st.error("❌ Unable to load portfolio data. Try again later.")
     else:
-        # -------------------------------
-        # FIX: Handle missing Adj Close
-        # -------------------------------
+        # -----------------------------------------------------
+        # Handle MultiIndex columns safely ("Adj Close", etc.)
+        # -----------------------------------------------------
         if isinstance(prices.columns, pd.MultiIndex):
-            # MultiIndex layout (usual for multi-ticker)
             if ("Adj Close", portfolio[0]) in prices.columns:
                 prices_used = prices["Adj Close"]
             elif ("Close", portfolio[0]) in prices.columns:
                 prices_used = prices["Close"]
             else:
-                st.error("❌ No usable price data (Adj Close or Close missing). Try different tickers.")
+                st.error("❌ No usable ('Adj Close' or 'Close') price data returned.")
                 st.stop()
         else:
-            # SingleIndex fallback
             if "Adj Close" in prices.columns:
                 prices_used = prices["Adj Close"]
             elif "Close" in prices.columns:
                 prices_used = prices["Close"]
             else:
-                st.error("❌ No usable price data returned.")
+                st.error("❌ No usable price columns found.")
                 st.stop()
 
-        # Benchmark
+        # -----------------------------------------------------
+        # Benchmark (SPY)
+        # -----------------------------------------------------
         bench = safe_download("SPY", period="1y")
         if bench is None:
-            st.error("❌ SPY benchmark failed to load. Try again later.")
+            st.error("❌ Failed to load SPY benchmark.")
             st.stop()
 
         if "Adj Close" in bench.columns:
@@ -223,21 +231,51 @@ else:
         elif "Close" in bench.columns:
             bench_used = bench["Close"]
         else:
-            st.error("❌ SPY data missing price columns.")
+            st.error("❌ SPY missing price data.")
             st.stop()
 
+        # -----------------------------------------------------
         # Returns
-returns = prices_used.pct_change().dropna()
-weights = np.array([1/5] * 5)
-portfolio_returns = (returns * weights).sum(axis=1)
+        # -----------------------------------------------------
+        returns = prices_used.pct_change().dropna()
+        weights = np.array([1/5] * 5)
 
-benchmark_returns = bench_used.pct_change().dropna()
+        # Force portfolio_returns clean
+        portfolio_returns = (returns * weights).sum(axis=1).astype(float)
 
-# -------------------------------
-# FIX: Always convert to floats
-# -------------------------------
-total_return = float((1 + portfolio_returns).prod() - 1)
-bench_return = float((1 + benchmark_returns).prod() - 1)
-outperf = float(total_return - bench_return)
-vol = float(portfolio_returns.std() * np.sqrt(252))
-sharpe = float((portfolio_returns.mean() * 252) / (portfolio_returns.std() * np.sqrt(252)))
+        # Benchmark returns (safe handling)
+        raw_bench_returns = bench_used.pct_change().dropna()
+
+        if isinstance(raw_bench_returns, pd.DataFrame):
+            benchmark_returns = raw_bench_returns.iloc[:, 0]
+        else:
+            benchmark_returns = raw_bench_returns
+
+        benchmark_returns = benchmark_returns.astype(float)
+
+        # Final metrics (always floats)
+        total_return = float((1 + portfolio_returns).prod() - 1)
+        bench_return = float((1 + benchmark_returns).prod() - 1)
+        outperf = float(total_return - bench_return)
+        vol = float(portfolio_returns.std() * np.sqrt(252))
+        sharpe = float((portfolio_returns.mean() * 252) / (portfolio_returns.std() * np.sqrt(252)))
+
+        # -----------------------------------------------------
+        # Display portfolio metrics
+        # -----------------------------------------------------
+        st.subheader("Portfolio Metrics")
+        st.write(f"**Total Return:** 🟦 {total_return:.2%}")
+        st.write(f"**SPY Return:** 🟧 {bench_return:.2%}")
+        st.write(f"**Outperformance:** {'🟢+' if outperf>0 else '🔴'} {outperf:.2%}")
+        st.write(f"**Volatility:** {vol_emoji('High' if vol>0.40 else 'Medium' if vol>=0.25 else 'Low')} — {vol:.2%}")
+        st.write(f"**Sharpe Ratio:** ⭐ {sharpe:.2f}")
+
+        # Chart
+        st.markdown('<div class="chart-box-yellow">', unsafe_allow_html=True)
+        cumulative = pd.DataFrame({
+            "Portfolio": (1 + portfolio_returns).cumprod(),
+            "SPY": (1 + benchmark_returns).cumprod()
+        })
+        st.line_chart(cumulative)
+        st.markdown("</div>", unsafe_allow_html=True)
+
