@@ -103,29 +103,59 @@ st.title("📊 Final Project Financial Dashboard")
 
 
 # =====================================================================
-# PART 1 — INDIVIDUAL STOCK ANALYSIS
+# PART 1 — INDIVIDUAL STOCK ANALYSIS (FULLY FIXED)
 # =====================================================================
 st.header("Part 1: Individual Stock Analysis")
 
-data = safe_download(stock)
+raw = yf.download(stock, period="6mo", interval="1d", progress=False)
 
-if data is None:
-    st.error("❌ Unable to retrieve stock data. Try another ticker.")
+# Handle failures and rate-limit returns
+if raw is None or raw.empty:
+    st.error(
+        f"❌ Unable to retrieve stock data for **{stock}**.\n"
+        "This usually happens due to Yahoo Finance rate limiting.\n"
+        "Please try again in 30–60 seconds."
+    )
 else:
-    # Moving averages
+    # --------------------------------------------------------
+    # FIX: Normalize MultiIndex → always extract a single Close series
+    # --------------------------------------------------------
+    if isinstance(raw.columns, pd.MultiIndex):
+        # Example: ("Close", "AAPL")
+        close_candidates = [col for col in raw.columns if col[0] == "Close"]
+        if close_candidates:
+            close_series = raw[close_candidates[0]]
+        else:
+            st.error("❌ No 'Close' price found in downloaded data.")
+            st.stop()
+    else:
+        if "Close" not in raw.columns:
+            st.error("❌ 'Close' column missing from data.")
+            st.stop()
+        close_series = raw["Close"]
+
+    # Normalize type
+    close_series = close_series.astype(float)
+
+    data = pd.DataFrame({"Close": close_series})
     data["20MA"] = data["Close"].rolling(20).mean()
     data["50MA"] = data["Close"].rolling(50).mean()
 
-    price = float(data["Close"].iloc[-1])
-    ma20 = data["20MA"].iloc[-1]
-    ma50 = data["50MA"].iloc[-1]
+    # Ensure we have enough rows
+    if len(data) < 60:
+        st.error("⚠ Not enough data to compute indicators (need at least 60 days).")
+        st.stop()
 
-    # -----------------------------------------------------
-    # Trend logic (safe for NaN)
-    # -----------------------------------------------------
-    if pd.isna(ma20) or pd.isna(ma50):
+    # Extract scalar safely
+    price = float(data["Close"].iloc[-1])
+    ma20 = float(data["20MA"].iloc[-1]) if not pd.isna(data["20MA"].iloc[-1]) else None
+    ma50 = float(data["50MA"].iloc[-1]) if not pd.isna(data["50MA"].iloc[-1]) else None
+
+    # --------------------------
+    # Trend Logic (safe)
+    # --------------------------
+    if ma20 is None or ma50 is None:
         trend = "Mixed Trend"
-        st.warning("⚠ Not enough data to compute moving averages.")
     else:
         if price > ma20 and ma20 > ma50:
             trend = "Strong Uptrend"
@@ -134,9 +164,9 @@ else:
         else:
             trend = "Mixed Trend"
 
-    # -----------------------------------------------------
+    # --------------------------
     # RSI
-    # -----------------------------------------------------
+    # --------------------------
     delta = data["Close"].diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
@@ -144,45 +174,51 @@ else:
     avg_loss = loss.rolling(14).mean()
     rs = avg_gain / avg_loss
     data["RSI"] = 100 - (100 / (1 + rs))
-    rsi_val = float(data["RSI"].iloc[-1])
 
-    if rsi_val > 70:
+    rsi_val = float(data["RSI"].iloc[-1]) if not pd.isna(data["RSI"].iloc[-1]) else None
+
+    if rsi_val is None:
+        rsi_sig = "Neutral"
+    elif rsi_val > 70:
         rsi_sig = "Overbought (Sell Signal)"
     elif rsi_val < 30:
         rsi_sig = "Oversold (Buy Signal)"
     else:
         rsi_sig = "Neutral"
 
-    # -----------------------------------------------------
+    # --------------------------
     # Volatility
-    # -----------------------------------------------------
+    # --------------------------
     data["Return"] = data["Close"].pct_change()
     vol_series = data["Return"].rolling(20).std() * np.sqrt(252)
-    vol_val = float(vol_series.iloc[-1])
+    vol_val = float(vol_series.iloc[-1]) if not pd.isna(vol_series.iloc[-1]) else None
 
-    if vol_val > 0.40:
+    if vol_val is None:
+        vol_class = "Medium"
+    elif vol_val > 0.40:
         vol_class = "High"
     elif vol_val >= 0.25:
         vol_class = "Medium"
     else:
         vol_class = "Low"
 
-    # Display results
+    # --------------------------
+    # DISPLAY
+    # --------------------------
     st.subheader(f"Results for {stock}")
     st.write(f"**Trend:** {trend_emoji(trend)}")
-    st.write(f"**RSI:** {rsi_emoji(rsi_sig)} — {rsi_val:.2f}")
-    st.write(f"**Volatility:** {vol_emoji(vol_class)} — {vol_val:.2%}")
+    st.write(f"**RSI:** {rsi_emoji(rsi_sig)} — {rsi_val:.2f}" if rsi_val else "RSI unavailable")
+    st.write(f"**Volatility:** {vol_emoji(vol_class)} — {vol_val:.2%}" if vol_val else "Volatility unavailable")
 
     # Chart
     st.markdown('<div class="chart-box-green">', unsafe_allow_html=True)
-    fig, ax = plt.subplots(figsize=(10,4))
+    fig, ax = plt.subplots(figsize=(10, 4))
     ax.plot(data["Close"], label="Close", color="white")
     ax.plot(data["20MA"], label="20MA", color="cyan")
     ax.plot(data["50MA"], label="50MA", color="magenta")
     ax.legend()
     st.pyplot(fig)
     st.markdown("</div>", unsafe_allow_html=True)
-
 
 
 # =====================================================================
