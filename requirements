@@ -1,5 +1,6 @@
-import streamlit 
-import yfinance 
-import numpy 
-import pandas
-import matplotlib.pyplot 
+streamlit
+yfinance
+pandas
+numpy
+matplotlib
+pillow
