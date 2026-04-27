@@ -177,8 +177,6 @@ else:
     ax.legend()
     st.pyplot(fig)
     st.markdown("</div>", unsafe_allow_html=True)
-
-
 # -----------------------------------------------------------
 # PART 2 — PORTFOLIO PERFORMANCE
 # -----------------------------------------------------------
@@ -190,39 +188,69 @@ else:
     prices = yf.download(portfolio, period="1y", progress=False)
 
     if prices is None or prices.empty:
-        st.error("❌ Unable to load portfolio data.")
+        st.error("❌ Unable to load portfolio data. YFinance may be rate-limited. Try again in 1 minute.")
     else:
-        prices = prices["Adj Close"]
-        bench = safe_download("SPY", period="1y")
-
-        if bench is None:
-            st.error("❌ SPY benchmark could not be downloaded.")
+        # -------------------------------
+        # FIX: Handle missing Adj Close
+        # -------------------------------
+        if isinstance(prices.columns, pd.MultiIndex):
+            # MultiIndex layout (usual for multi-ticker)
+            if ("Adj Close", portfolio[0]) in prices.columns:
+                prices_used = prices["Adj Close"]
+            elif ("Close", portfolio[0]) in prices.columns:
+                prices_used = prices["Close"]
+            else:
+                st.error("❌ No usable price data (Adj Close or Close missing). Try different tickers.")
+                st.stop()
         else:
-            bench = bench["Adj Close"]
+            # SingleIndex fallback
+            if "Adj Close" in prices.columns:
+                prices_used = prices["Adj Close"]
+            elif "Close" in prices.columns:
+                prices_used = prices["Close"]
+            else:
+                st.error("❌ No usable price data returned.")
+                st.stop()
 
-            returns = prices.pct_change().dropna()
-            weights = np.array([1/5] * 5)
-            portfolio_returns = (returns * weights).sum(axis=1)
+        # Benchmark
+        bench = safe_download("SPY", period="1y")
+        if bench is None:
+            st.error("❌ SPY benchmark failed to load. Try again later.")
+            st.stop()
 
-            benchmark_returns = bench.pct_change().dropna()
+        if "Adj Close" in bench.columns:
+            bench_used = bench["Adj Close"]
+        elif "Close" in bench.columns:
+            bench_used = bench["Close"]
+        else:
+            st.error("❌ SPY data missing price columns.")
+            st.stop()
 
-            total_return = (1 + portfolio_returns).prod() - 1
-            bench_return = (1 + benchmark_returns).prod() - 1
-            outperf = total_return - bench_return
-            vol = portfolio_returns.std() * np.sqrt(252)
-            sharpe = (portfolio_returns.mean()*252) / (portfolio_returns.std()*np.sqrt(252))
+        # Returns
+        returns = prices_used.pct_change().dropna()
+        weights = np.array([1/5] * 5)
+        portfolio_returns = (returns * weights).sum(axis=1)
 
-            st.subheader("Portfolio Metrics")
-            st.write(f"**Total Return:** 🟦 {total_return:.2%}")
-            st.write(f"**SPY Return:** 🟧 {bench_return:.2%}")
-            st.write(f"**Outperformance:** {'🟢+' if outperf>0 else '🔴'} {outperf:.2%}")
-            st.write(f"**Volatility:** {vol_emoji('High' if vol>0.4 else 'Medium' if vol>=0.25 else 'Low')} — {vol:.2%}")
-            st.write(f"**Sharpe Ratio:** ⭐ {sharpe:.2f}")
+        benchmark_returns = bench_used.pct_change().dropna()
 
-            st.markdown('<div class="chart-box-yellow">', unsafe_allow_html=True)
-            cumulative = pd.DataFrame({
-                "Portfolio": (1 + portfolio_returns).cumprod(),
-                "SPY": (1 + benchmark_returns).cumprod()
-            })
-            st.line_chart(cumulative)
-            st.markdown("</div>", unsafe_allow_html=True)
+        total_return = (1 + portfolio_returns).prod() - 1
+        bench_return = (1 + benchmark_returns).prod() - 1
+        outperf = total_return - bench_return
+        vol = portfolio_returns.std() * np.sqrt(252)
+        sharpe = (portfolio_returns.mean()*252) / (portfolio_returns.std()*np.sqrt(252))
+
+        st.subheader("Portfolio Metrics")
+
+        st.write(f"**Total Return:** 🟦 {total_return:.2%}")
+        st.write(f"**SPY Return:** 🟧 {bench_return:.2%}")
+        st.write(f"**Outperformance:** {'🟢+' if outperf>0 else '🔴'} {outperf:.2%}")
+        st.write(f"**Volatility:** {vol_emoji('High' if vol>0.40 else 'Medium' if vol>=0.25 else 'Low')} — {vol:.2%}")
+        st.write(f"**Sharpe Ratio:** ⭐ {sharpe:.2f}")
+
+        st.markdown('<div class="chart-box-yellow">', unsafe_allow_html=True)
+        cumulative = pd.DataFrame({
+            "Portfolio": (1 + portfolio_returns).cumprod(),
+            "SPY": (1 + benchmark_returns).cumprod()
+        })
+        st.line_chart(cumulative)
+        st.markdown("</div>", unsafe_allow_html=True)
